@@ -1,19 +1,6 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <!--
-    If you are serving your web app in a path other than the root, change the
-    href value below to reflect the base path you are serving from.
-
-    The path provided below has to start and end with a slash "/" in order for
-    it to work correctly.
-
-    For more details:
-    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
-
-    This is a placeholder for base href that will be replaced by the value of
-    the `--base-href` argument provided to `flutter build`.
-  -->
   <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
@@ -31,6 +18,15 @@
 
   <title>regi_chat</title>
   <link rel="manifest" href="manifest.json">
+
+  <!--
+    Auth0 SPA SDK — required by `auth0_flutter` on the web platform.
+    Make sure these URLs are configured in the Auth0 dashboard for the SPA app:
+      - Allowed Callback URLs:   http://localhost:5000, https://<netlify-domain>
+      - Allowed Logout URLs:     http://localhost:5000, https://<netlify-domain>
+      - Allowed Web Origins:     http://localhost:5000, https://<netlify-domain>
+  -->
+  <script src="https://cdn.auth0.com/js/auth0-spa-js/2.1/auth0-spa-js.production.js"></script>
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>
