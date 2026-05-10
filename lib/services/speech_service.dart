@@ -54,14 +54,29 @@ class SpeechService {
     _transcripts = controller;
 
     try {
+      // Walkie-talkie semantics: keep listening while the user holds the
+      // PTT button. Defaults are tuned for short single-utterance use cases
+      // and auto-stop after ~3s of silence — wrong for hold-to-talk.
+      //
+      //   listenFor: max session duration. Set to 5min as a safety; the
+      //              user will release long before that under normal use.
+      //   pauseFor:  silence-detection timeout. Default ~3s ends the
+      //              session if the user pauses to think mid-sentence.
+      //              Bumped to 60s so long pauses don't kill the capture.
+      //   listenMode.dictation: continuous mode (vs. confirmation) so STT
+      //              keeps emitting partials and doesn't self-terminate
+      //              after a single phrase.
       _speech.listen(
         onResult: (result) {
           if (controller.isClosed) return;
           controller.add(result.recognizedWords);
         },
+        listenFor: const Duration(minutes: 5),
+        pauseFor: const Duration(seconds: 60),
         listenOptions: stt.SpeechListenOptions(
           partialResults: true,
           cancelOnError: true,
+          listenMode: stt.ListenMode.dictation,
         ),
       );
     } catch (e) {
