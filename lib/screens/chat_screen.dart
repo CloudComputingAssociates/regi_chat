@@ -8,8 +8,8 @@ import '../models/input_mode.dart';
 import '../services/auth_service.dart';
 import '../services/chat_service.dart';
 import '../services/mic_level_service.dart';
-import '../services/speech_service.dart';
 import '../services/tts_service.dart' show TtsService, TtsException;
+import '../services/web_speech_service.dart';
 import '../state/chat_state.dart';
 import '../widgets/chat_input.dart';
 import '../widgets/chat_output.dart';
@@ -24,8 +24,15 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
+  // POC kill switch: when true, opens a parallel getUserMedia stream to
+  // drive real audio-reactive bars. Suspect this conflicts with
+  // webkitSpeechRecognition on Chrome — recognition gets a silent stream
+  // from the same mic. Set to false to fall back to self-animating bars
+  // and let speech_to_text have exclusive mic ownership.
+  static const _useMicLevelMeter = false;
+
   final ChatService _chat = ChatService();
-  final SpeechService _speech = SpeechService();
+  final WebSpeechService _speech = WebSpeechService();
   final TtsService _tts = TtsService();
   final MicLevelService _micLevel = MicLevelService();
   StreamSubscription<String>? _speechSub;
@@ -234,35 +241,37 @@ class _ChatScreenState extends State<ChatScreen> {
     state.setTalkActive(true);
     state.setCurrentInput('');
 
-    // Start the audio level sampler in parallel with STT. Fire-and-forget;
-    // if it fails the bars sit flat and the [mic] error line tells us why.
-    unawaited(_micLevel.start().then((ok) {
-      if (!mounted) return;
-      _logDebug('[mic] start ok=$ok');
-      if (ok) {
-        // Sample peak level every ~500ms so we can see if audio is actually
-        // flowing. If peaks stay at 0 across the hold, mic is silent.
-        _micLevelDebugSub?.cancel();
-        var peak = 0.0;
-        var samples = 0;
-        Timer? heartbeat;
-        _micLevelDebugSub = _micLevel.levels.listen((v) {
-          if (v > peak) peak = v;
-          samples++;
-        });
-        heartbeat = Timer.periodic(const Duration(milliseconds: 500), (t) {
-          if (!mounted || _micLevelDebugSub == null) {
-            t.cancel();
-            return;
-          }
-          _logDebug('[mic] peak=${peak.toStringAsFixed(3)} samples=$samples');
-          peak = 0.0;
-          samples = 0;
-        });
-        // Stash the heartbeat so dispose can cancel it.
-        _micLevelHeartbeat = heartbeat;
-      }
-    }));
+    // Start the audio level sampler in parallel with STT, only if the
+    // kill switch above is on. We suspect it starves Web Speech of audio.
+    if (_useMicLevelMeter) {
+      unawaited(_micLevel.start().then((ok) {
+        if (!mounted) return;
+        _logDebug('[mic] start ok=$ok');
+        if (ok) {
+          _micLevelDebugSub?.cancel();
+          var peak = 0.0;
+          var samples = 0;
+          Timer? heartbeat;
+          _micLevelDebugSub = _micLevel.levels.listen((v) {
+            if (v > peak) peak = v;
+            samples++;
+          });
+          heartbeat = Timer.periodic(const Duration(milliseconds: 500), (t) {
+            if (!mounted || _micLevelDebugSub == null) {
+              t.cancel();
+              return;
+            }
+            _logDebug(
+                '[mic] peak=${peak.toStringAsFixed(3)} samples=$samples');
+            peak = 0.0;
+            samples = 0;
+          });
+          _micLevelHeartbeat = heartbeat;
+        }
+      }));
+    } else {
+      _logDebug('[mic] meter disabled — STT-only mode');
+    }
 
     final ok = await _speech.initialize();
     _logDebug('[stt] initialize ok=$ok available=${_speech.isAvailable}');
@@ -347,7 +356,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 onPromptMe: _handlePromptMe,
                 onTalkStart: _handleTalkStart,
                 onTalkEnd: _handleTalkEnd,
-                micLevels: _micLevel.levels,
+                micLevels: _useMicLevelMeter ? _micLevel.levels : null,
               ),
             ],
           ),
