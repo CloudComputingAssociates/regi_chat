@@ -1,10 +1,9 @@
 [build]
-  # `.env` is gitignored and not present in the Netlify build env, but
-  # pubspec.yaml declares it as an asset (needed for flutter_dotenv to work
-  # in local dev). Touch an empty .env so the build doesn't fail; real
-  # config is injected via --dart-define and read by lib/config.dart.
+  # All runtime config is delivered via --dart-define from Netlify env vars
+  # (Site settings → Environment variables). lib/config.dart reads them with
+  # const String.fromEnvironment(...). Set in Netlify:
+  #   AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_AUDIENCE, API_BASE_URL
   command = """
-    touch .env && \
     ([ -d _flutter ] || git clone https://github.com/flutter/flutter.git --depth 1 -b stable _flutter) && \
     export PATH="$PATH:$(pwd)/_flutter/bin" && \
     flutter pub get && \

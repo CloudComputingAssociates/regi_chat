@@ -12,6 +12,36 @@ class ChatException implements Exception {
   String toString() => 'ChatException: $message';
 }
 
+/// One parsed event from the SSE stream of `POST /ai/chat/stream`.
+/// Mirrors regi-api's `models.StreamEvent` ([regi-api/models/ai.go]).
+///
+/// Any field can be null on a given event:
+///   - content events: delta + sessionId
+///   - done events:    sessionId, sessionStatus, tokensRemaining
+///   - error events:   error + sessionId
+class ChatStreamChunk {
+  const ChatStreamChunk({
+    this.type,
+    this.delta,
+    this.sessionId,
+    this.sessionStatus,
+    this.tokensRemaining,
+    this.contextWarning,
+    this.error,
+  });
+
+  final String? type;
+  final String? delta;
+  final String? sessionId;
+  final String? sessionStatus;
+  final int? tokensRemaining;
+  final String? contextWarning;
+  final String? error;
+
+  bool get hasError => error != null && error!.isNotEmpty;
+  bool get hasDelta => delta != null && delta!.isNotEmpty;
+}
+
 class ChatService {
   ChatService({http.Client? client}) : _client = client ?? http.Client();
 
@@ -19,20 +49,18 @@ class ChatService {
 
   String get _baseUrl => Config.apiBaseUrl;
 
-  /// Streams response chunks from `POST {API_BASE_URL}/ai/chat/stream`.
-  ///
-  /// TODO: confirm wire format on first run. Current parser assumes SSE-style
-  /// `data: {...}\n\n` lines with a JSON payload that contains a `delta` or
-  /// `content` field. Falls back to yielding raw text if no recognised JSON
-  /// envelope is present, so a NDJSON or plaintext server still produces
-  /// something visible while we calibrate.
-  Stream<String> streamChat({
+  /// Streams parsed events from `POST {API_BASE_URL}/ai/chat/stream`.
+  /// Caller appends [ChatStreamChunk.delta] to the visible message and
+  /// captures [ChatStreamChunk.sessionId] to enable session continuity.
+  Stream<ChatStreamChunk> streamChat({
     required String message,
     required String? sessionId,
     required String jwt,
   }) async* {
     if (_baseUrl.isEmpty) {
-      throw ChatException('API_BASE_URL missing — check .env');
+      throw ChatException(
+        'API_BASE_URL missing — pass via --dart-define',
+      );
     }
 
     final request = http.Request('POST', Uri.parse('$_baseUrl/ai/chat/stream'));
@@ -56,34 +84,72 @@ class ChatService {
       final payload = line.startsWith('data:') ? line.substring(5).trim() : line;
       if (payload == '[DONE]') break;
 
-      final extracted = _extractText(payload);
-      if (extracted != null && extracted.isNotEmpty) {
-        yield extracted;
-      }
+      final chunk = _parseEvent(payload);
+      if (chunk != null) yield chunk;
     }
   }
 
-  String? _extractText(String payload) {
+  ChatStreamChunk? _parseEvent(String payload) {
     try {
       final decoded = jsonDecode(payload);
-      if (decoded is Map<String, dynamic>) {
-        final delta = decoded['delta'] ?? decoded['content'] ?? decoded['text'];
-        if (delta is String) return delta;
-        final choices = decoded['choices'];
-        if (choices is List && choices.isNotEmpty) {
-          final first = choices.first;
-          if (first is Map<String, dynamic>) {
-            final inner = first['delta'];
-            if (inner is Map<String, dynamic>) {
-              final c = inner['content'];
-              if (c is String) return c;
-            }
+      if (decoded is! Map<String, dynamic>) {
+        // Fallback: treat raw text as a content delta so a non-JSON server
+        // still produces something visible.
+        return ChatStreamChunk(delta: payload);
+      }
+
+      // Pull regi-api StreamEvent fields (models/ai.go):
+      //   type, delta, content, sessionId, sessionStatus, tokensRemaining,
+      //   contextWarning, error.
+      final delta = decoded['delta'] as String? ??
+          decoded['content'] as String? ??
+          decoded['text'] as String?;
+
+      // OpenAI-style nested envelope, in case some upstream uses it.
+      String? nestedDelta;
+      final choices = decoded['choices'];
+      if (choices is List && choices.isNotEmpty) {
+        final first = choices.first;
+        if (first is Map<String, dynamic>) {
+          final inner = first['delta'];
+          if (inner is Map<String, dynamic>) {
+            final c = inner['content'];
+            if (c is String) nestedDelta = c;
           }
         }
       }
-      return null;
+
+      return ChatStreamChunk(
+        type: decoded['type'] as String?,
+        delta: delta ?? nestedDelta,
+        sessionId: decoded['sessionId'] as String?,
+        sessionStatus: decoded['sessionStatus'] as String?,
+        tokensRemaining: decoded['tokensRemaining'] as int?,
+        contextWarning: decoded['contextWarning'] as String?,
+        error: decoded['error'] as String?,
+      );
     } on FormatException {
-      return payload;
+      return ChatStreamChunk(delta: payload);
+    }
+  }
+
+  /// Marks the server-side session as CLOSED via
+  /// `DELETE /api/ai/chat/sessions/{sessionId}`. Best-effort — failures are
+  /// swallowed because the visible UI has already moved on and the server
+  /// will idle-time-out the session anyway.
+  Future<void> closeSession({
+    required String sessionId,
+    required String jwt,
+  }) async {
+    if (_baseUrl.isEmpty || sessionId.isEmpty) return;
+    try {
+      await _client.delete(
+        Uri.parse('$_baseUrl/ai/chat/sessions/$sessionId'),
+        headers: {'Authorization': 'Bearer $jwt'},
+      );
+      // 204 on success, 404 if the session doesn't exist. Either is fine.
+    } catch (_) {
+      // Network error, 401, etc. Cleanup is best-effort by design.
     }
   }
 

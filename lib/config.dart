@@ -1,34 +1,26 @@
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-
-/// Reads config values with this precedence:
-///   1. compile-time `--dart-define` (used by netlify.toml in production)
-///   2. runtime `.env` via flutter_dotenv (used in local dev)
-/// Returns empty string if neither source has it.
+/// Reads config exclusively from compile-time `--dart-define` values.
+///
+/// Local dev: pass them on the flutter command line, e.g.
+///   flutter run -d chrome --web-port=5000 \
+///     --dart-define=AUTH0_DOMAIN=dev-xxx.us.auth0.com \
+///     --dart-define=AUTH0_CLIENT_ID=... \
+///     --dart-define=AUTH0_AUDIENCE=https://api.regimenu.net \
+///     --dart-define=API_BASE_URL=https://api.regimenu.net/api
+///
+/// Netlify: same keys are set in Site settings → Environment variables, and
+/// netlify.toml expands them into --dart-define args at build time.
 class Config {
   const Config._();
 
-  static String _read(String key, String fromEnv) {
-    if (fromEnv.isNotEmpty) return fromEnv;
-    return dotenv.env[key] ?? '';
-  }
+  static const String auth0Domain =
+      String.fromEnvironment('AUTH0_DOMAIN');
 
-  static String get auth0Domain => _read(
-        'AUTH0_DOMAIN',
-        const String.fromEnvironment('AUTH0_DOMAIN'),
-      );
+  static const String auth0ClientId =
+      String.fromEnvironment('AUTH0_CLIENT_ID');
 
-  static String get auth0ClientId => _read(
-        'AUTH0_CLIENT_ID',
-        const String.fromEnvironment('AUTH0_CLIENT_ID'),
-      );
+  static const String auth0Audience =
+      String.fromEnvironment('AUTH0_AUDIENCE');
 
-  static String get auth0Audience => _read(
-        'AUTH0_AUDIENCE',
-        const String.fromEnvironment('AUTH0_AUDIENCE'),
-      );
-
-  static String get apiBaseUrl => _read(
-        'API_BASE_URL',
-        const String.fromEnvironment('API_BASE_URL'),
-      );
+  static const String apiBaseUrl =
+      String.fromEnvironment('API_BASE_URL');
 }

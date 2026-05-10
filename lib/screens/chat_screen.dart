@@ -13,6 +13,7 @@ import '../state/chat_state.dart';
 import '../widgets/chat_input.dart';
 import '../widgets/chat_output.dart';
 import '../widgets/ptt_button.dart';
+import '../widgets/voice_picker.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -31,6 +32,19 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _speech.initialize();
+    // Fire-and-forget voice fetch on first render. Failure is silent — the
+    // picker just won't appear, and TTS falls back to the server's default.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadVoices());
+  }
+
+  Future<void> _loadVoices() async {
+    if (!mounted) return;
+    final auth = context.read<AuthService>();
+    final jwt = await auth.getAccessToken();
+    if (jwt == null || !mounted) return;
+    final voices = await _tts.fetchVoices(jwt: jwt);
+    if (!mounted) return;
+    context.read<ChatState>().setAvailableVoices(voices);
   }
 
   @override
@@ -59,13 +73,28 @@ class _ChatScreenState extends State<ChatScreen> {
 
     final wasVoiceMode = state.mode == InputMode.voice;
     final stream = state.startAssistantStream();
+    String? lastSessionStatus;
     try {
       await for (final chunk in _chat.streamChat(
         message: text,
         sessionId: state.sessionId,
         jwt: jwt,
       )) {
-        state.appendToStream(stream, chunk);
+        // Capture sessionId so subsequent turns resume the same conversation.
+        // The server emits it on the first event of a new session and on
+        // status events thereafter; setSessionId is a no-op if unchanged.
+        if (chunk.sessionId != null && chunk.sessionId != state.sessionId) {
+          state.setSessionId(chunk.sessionId);
+        }
+        if (chunk.sessionStatus != null) {
+          lastSessionStatus = chunk.sessionStatus;
+        }
+        if (chunk.hasError) {
+          state.appendToStream(stream, '\n[error: ${chunk.error}]');
+        }
+        if (chunk.hasDelta) {
+          state.appendToStream(stream, chunk.delta!);
+        }
       }
       state.completeStream(stream);
     } catch (e) {
@@ -74,21 +103,95 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
-    // Speak the assistant reply only when the user is in voice mode.
-    // In text mode they're reading; speaking would be intrusive.
-    // POC: TTS failures are surfaced into the chat output as a visible log
-    // line (even though the user is in voice mode, screen still shows them).
-    if (wasVoiceMode && stream.content.trim().isNotEmpty) {
-      final freshJwt = await auth.getAccessToken() ?? jwt;
-      try {
-        await _tts.speak(stream.content, jwt: freshJwt);
-      } on TtsException catch (e) {
-        if (!mounted) return;
+    // If the server told us the session is no longer ACTIVE (timed out, hit
+    // the context cap, or was closed), drop the sessionId so the next turn
+    // starts a fresh conversation. Surface a small log line so the user
+    // knows why memory just reset.
+    if (lastSessionStatus != null && lastSessionStatus != 'ACTIVE') {
+      state.setSessionId(null);
+      if (mounted) {
         state.addMessage(TextMessage(
-          content: '[tts] $e',
+          content: '[session $lastSessionStatus — starting new conversation]',
           role: MessageRole.assistant,
         ));
       }
+    }
+
+    // Speak the assistant reply only when the user is in voice mode.
+    // In text mode they're reading; speaking would be intrusive. Fire-and-
+    // forget — we don't block _sendMessage on TTS so the user can keep
+    // interacting while audio plays. POC: TTS failures are surfaced into
+    // the chat output as a visible log line.
+    if (wasVoiceMode && stream.content.trim().isNotEmpty) {
+      final replyText = stream.content;
+      final voiceId = state.selectedVoice?.id;
+      unawaited(() async {
+        final freshJwt = await auth.getAccessToken() ?? jwt;
+        try {
+          await _tts.speak(replyText, jwt: freshJwt, voice: voiceId);
+        } on TtsException catch (e) {
+          if (!mounted) return;
+          context.read<ChatState>().addMessage(TextMessage(
+                content: '[tts] $e',
+                role: MessageRole.assistant,
+              ));
+        }
+      }());
+    }
+  }
+
+  Future<void> _handleNewChat() async {
+    final state = context.read<ChatState>();
+    if (state.messages.isEmpty && state.sessionId == null) {
+      return; // already empty — nothing to clear
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF252525),
+        title: const Text(
+          'Start a new chat?',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: const Text(
+          'The current conversation will clear from this view. '
+          'Server-side history is preserved.',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: Colors.white70),
+            ),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFF8B1A2B),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('New chat'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final priorSessionId = state.sessionId;
+    final auth = context.read<AuthService>();
+
+    // Clear local UI immediately — instant feedback, no waiting on the network.
+    context.read<ChatState>().clearChat();
+
+    // Fire-and-forget the server-side close so Status flips to CLOSED.
+    // Best-effort: if DELETE fails the session will idle-timeout on its own.
+    if (priorSessionId != null && priorSessionId.isNotEmpty) {
+      unawaited(() async {
+        final jwt = await auth.getAccessToken();
+        if (jwt == null) return;
+        await _chat.closeSession(sessionId: priorSessionId, jwt: jwt);
+      }());
     }
   }
 
@@ -149,7 +252,13 @@ class _ChatScreenState extends State<ChatScreen> {
         title: const Text('RegiMenu'),
         actions: [
           IconButton(
+            icon: const Icon(Icons.add_comment_outlined),
+            tooltip: 'New chat',
+            onPressed: _handleNewChat,
+          ),
+          IconButton(
             icon: const Icon(Icons.logout),
+            tooltip: 'Sign out',
             onPressed: () => context.read<AuthService>().logout(),
           ),
         ],
@@ -158,6 +267,7 @@ class _ChatScreenState extends State<ChatScreen> {
         children: [
           Column(
             children: [
+              const VoicePicker(),
               const Expanded(child: ChatOutput()),
               ChatInput(
                 onSend: _sendMessage,

@@ -25,7 +25,8 @@ class AuthService extends ChangeNotifier {
     if (_initialized) return;
     if (_domain.isEmpty || _clientId.isEmpty) {
       throw StateError(
-        'AUTH0_DOMAIN / AUTH0_CLIENT_ID missing — check .env file.',
+        'AUTH0_DOMAIN / AUTH0_CLIENT_ID missing — '
+        'pass via --dart-define (or set in Netlify env vars).',
       );
     }
 
