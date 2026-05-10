@@ -13,39 +13,21 @@ class ChatOutput extends StatefulWidget {
 
 class _ChatOutputState extends State<ChatOutput> {
   final ScrollController _controller = ScrollController();
-  bool _userScrolledUp = false;
-  int _lastMessageCount = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller.addListener(_onScroll);
-  }
 
   @override
   void dispose() {
-    _controller.removeListener(_onScroll);
     _controller.dispose();
     super.dispose();
   }
 
-  void _onScroll() {
-    if (!_controller.hasClients) return;
-    final pos = _controller.position;
-    final atBottom = pos.pixels >= pos.maxScrollExtent - 24;
-    if (_userScrolledUp != !atBottom) {
-      setState(() => _userScrolledUp = !atBottom);
-    }
-  }
-
   void _scheduleAutoScroll() {
+    // Pin to bottom on every content change (new message or streaming chunk).
+    // Simpler than tracking manual-scroll intent and matches POC expectation
+    // of "show me the latest." If user wants to scroll back through history,
+    // they can — but new content always brings them back to the live edge.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_controller.hasClients) return;
-      _controller.animateTo(
-        _controller.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOut,
-      );
+      _controller.jumpTo(_controller.position.maxScrollExtent);
     });
   }
 
@@ -54,13 +36,7 @@ class _ChatOutputState extends State<ChatOutput> {
     final state = context.watch<ChatState>();
     final messages = state.messages;
 
-    if (messages.length != _lastMessageCount && !_userScrolledUp) {
-      _lastMessageCount = messages.length;
-      _scheduleAutoScroll();
-    } else if (!_userScrolledUp) {
-      // Streaming chunks may grow the last message without changing count.
-      _scheduleAutoScroll();
-    }
+    _scheduleAutoScroll();
 
     if (messages.isEmpty) {
       return const Center(
@@ -125,8 +101,8 @@ class _Bubble extends StatelessWidget {
         ),
         decoration: BoxDecoration(
           color: isUser
-              ? const Color(0xFF8B1A2B)
-              : const Color(0xFF2A2A2A),
+              ? const Color(0xFF4A4A4A) // user prompt: medium gray
+              : const Color(0xFF2A2A2A), // assistant reply: darker gray
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(16),
             topRight: const Radius.circular(16),

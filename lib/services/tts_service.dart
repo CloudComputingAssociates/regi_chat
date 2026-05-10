@@ -88,6 +88,13 @@ class TtsService {
 
     try {
       final bytes = base64Decode(b64);
+      // Defensive: tear down any in-flight playback before starting a new
+      // one. On web, calling play() twice in close succession against the
+      // same AudioPlayer can result in overlapping audio elements (the
+      // previous blob URL not yet released). stop() + release-mode reset
+      // guarantees the player is in a clean state per synthesis.
+      await _player.stop();
+      await _player.setReleaseMode(ReleaseMode.release);
       await _player.play(BytesSource(bytes));
     } catch (e) {
       throw TtsException('playback failed: $e');

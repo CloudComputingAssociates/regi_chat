@@ -7,7 +7,6 @@ import '../models/chat_message.dart';
 import '../models/input_mode.dart';
 import '../services/auth_service.dart';
 import '../services/chat_service.dart';
-import '../services/mic_level_service.dart';
 import '../services/tts_service.dart' show TtsService, TtsException;
 import '../services/web_speech_service.dart';
 import '../state/chat_state.dart';
@@ -25,42 +24,21 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  // POC kill switch: when true, opens a parallel getUserMedia stream to
-  // drive real audio-reactive bars. Conflicts with webkitSpeechRecognition
-  // on Chrome — recognition gets a silent stream from the same mic.
-  static const _useMicLevelMeter = false;
-
   final ChatService _chat = ChatService();
   final WebSpeechService _speech = WebSpeechService();
   final TtsService _tts = TtsService();
-  final MicLevelService _micLevel = MicLevelService();
   StreamSubscription<String>? _speechSub;
-  StreamSubscription<String>? _speechErrSub;
-  StreamSubscription<String>? _micErrSub;
-  StreamSubscription<double>? _micLevelDebugSub;
-  Timer? _micLevelHeartbeat;
 
-  // Prepended to the first user message of a new session so the model is
-  // primed for short, voice-friendly replies. Subsequent turns inherit.
+  // Prepended to EVERY user message — models drift mid-session and stop
+  // honoring a one-shot directive after a few turns. Stricter wording too.
   static const _conciseDirective =
-      'Be concise. Reply in 1-3 sentences unless I ask for more detail. ';
+      'Reply in 1-2 sentences, max 30 words. No preamble or filler. ';
 
   @override
   void initState() {
     super.initState();
     _speech.initialize();
-    _speechErrSub = _speech.errors.listen((msg) => _logDebug('[stt err] $msg'));
-    _speech.statuses.listen((s) => _logDebug('[stt] $s'));
-    _micErrSub = _micLevel.errors.listen((msg) => _logDebug('[mic] $msg'));
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadVoices());
-  }
-
-  void _logDebug(String content) {
-    if (!mounted) return;
-    context.read<ChatState>().addMessage(TextMessage(
-          content: content,
-          role: MessageRole.assistant,
-        ));
   }
 
   Future<void> _loadVoices() async {
@@ -76,13 +54,8 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     _speechSub?.cancel();
-    _speechErrSub?.cancel();
-    _micErrSub?.cancel();
-    _micLevelDebugSub?.cancel();
-    _micLevelHeartbeat?.cancel();
     _speech.stop();
     _speech.dispose();
-    _micLevel.dispose();
     _chat.dispose();
     _tts.dispose();
     super.dispose();
@@ -103,8 +76,7 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
-    final isNewSession = state.sessionId == null;
-    final messageToSend = isNewSession ? '$_conciseDirective$text' : text;
+    final messageToSend = '$_conciseDirective$text';
 
     final stream = state.startAssistantStream();
     String? lastSessionStatus;
@@ -144,9 +116,6 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     }
 
-    // Speak the assistant reply when TTS is enabled (independent of input
-    // mode). Mute toggle on the chat input bar disables this. Fire-and-
-    // forget so synthesis latency doesn't block the next message.
     if (state.ttsEnabled && stream.content.trim().isNotEmpty) {
       final replyText = stream.content;
       final voiceId = state.selectedVoice?.id;
@@ -227,29 +196,12 @@ class _ChatScreenState extends State<ChatScreen> {
     state.setTalkActive(true);
     state.setCurrentInput('');
 
-    if (_useMicLevelMeter) {
-      unawaited(_micLevel.start().then((ok) {
-        if (!mounted) return;
-        _logDebug('[mic] start ok=$ok');
-      }));
-    }
-
     final ok = await _speech.initialize();
-    _logDebug('[stt] initialize ok=$ok available=${_speech.isAvailable}');
     if (!ok) return;
 
     _speechSub?.cancel();
-    var transcriptCount = 0;
     _speechSub = _speech.listen().listen((transcript) {
       if (!mounted) return;
-      transcriptCount++;
-      if (transcriptCount == 1 || transcriptCount % 5 == 0) {
-        final snippet = transcript.length > 40
-            ? '${transcript.substring(0, 40)}…'
-            : transcript;
-        _logDebug('[stt] event #$transcriptCount: "$snippet" '
-            '(len=${transcript.length})');
-      }
       context.read<ChatState>().setCurrentInput(transcript);
     });
   }
@@ -261,15 +213,8 @@ class _ChatScreenState extends State<ChatScreen> {
     await _speech.stop();
     await _speechSub?.cancel();
     _speechSub = null;
-    _micLevelHeartbeat?.cancel();
-    _micLevelHeartbeat = null;
-    await _micLevelDebugSub?.cancel();
-    _micLevelDebugSub = null;
-    unawaited(_micLevel.stop());
 
     final transcript = state.currentInput.trim();
-    _logDebug('[stt] release: transcript="${transcript.length} chars" '
-        'sending=${transcript.isNotEmpty}');
     state.setTalkActive(false);
     state.clearCurrentInput();
 
@@ -288,22 +233,16 @@ class _ChatScreenState extends State<ChatScreen> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF1B1B1B),
         foregroundColor: Colors.white,
-        // Title doubles as a status indicator: "RegiMenu" + a mic icon that
-        // lights up amber while listening + the audio-level squigglies to
-        // its right (only visible during talk).
         title: Row(
           children: [
             const Text('RegiMenu'),
             const SizedBox(width: 12),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 120),
-              child: Icon(
-                Icons.mic,
-                size: 18,
-                color: state.isTalkActive
-                    ? const Color(0xFFF2B33D)
-                    : Colors.white24,
-              ),
+            Icon(
+              Icons.mic,
+              size: 18,
+              color: state.isTalkActive
+                  ? const Color(0xFFF2B33D)
+                  : Colors.white24,
             ),
             const SizedBox(width: 8),
             if (state.isTalkActive)
@@ -347,8 +286,6 @@ class _ChatScreenState extends State<ChatScreen> {
             Positioned(
               left: 0,
               right: 0,
-              // Bar is two rows: ~56dp controls + 6dp gap + ~56dp input
-              // = ~118dp + ~24dp safe-area + ~52dp gap = ~210dp.
               bottom: 210,
               child: Center(
                 child: PttButton(
