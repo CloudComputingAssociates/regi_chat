@@ -28,6 +28,10 @@ class _ChatScreenState extends State<ChatScreen> {
   final WebSpeechService _speech = WebSpeechService();
   final TtsService _tts = TtsService();
   StreamSubscription<String>? _speechSub;
+  StreamSubscription<String>? _speechStatusSub;
+  // In-flight guard. Defends against any path that double-invokes
+  // _sendMessage (rapid double-tap, Flutter Web onSubmitted bugs, etc.).
+  bool _sending = false;
 
   // Prepended to EVERY user message — models drift mid-session and stop
   // honoring a one-shot directive after a few turns. Stricter wording too.
@@ -38,6 +42,22 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _speech.initialize();
+    // Track recognizer's actual listening state so the AppBar mic icon
+    // lights amber only when the recognizer is genuinely capturing audio,
+    // not just when the user pressed the button. This is the "ready" cue
+    // for the beginning-word cut-off issue: users learn to wait for the
+    // amber glow before they start speaking.
+    _speechStatusSub = _speech.statuses.listen((s) {
+      if (!mounted) return;
+      switch (s) {
+        case 'listening':
+        case 'speech-detected':
+          context.read<ChatState>().setListening(true);
+        case 'done':
+        case 'speech-ended':
+          context.read<ChatState>().setListening(false);
+      }
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadVoices());
   }
 
@@ -54,6 +74,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     _speechSub?.cancel();
+    _speechStatusSub?.cancel();
     _speech.stop();
     _speech.dispose();
     _chat.dispose();
@@ -62,6 +83,16 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _sendMessage(String text) async {
+    if (_sending) return;
+    _sending = true;
+    try {
+      await _doSendMessage(text);
+    } finally {
+      _sending = false;
+    }
+  }
+
+  Future<void> _doSendMessage(String text) async {
     final state = context.read<ChatState>();
     final auth = context.read<AuthService>();
 
@@ -237,15 +268,19 @@ class _ChatScreenState extends State<ChatScreen> {
           children: [
             const Text('RegiMenu'),
             const SizedBox(width: 12),
+            // Mic icon goes amber ONLY when the recognizer is actually
+            // listening (not just when the button was pressed). The
+            // ~100-200ms delay between press and amber is the user's cue
+            // that the recognizer is now ready and they can start talking.
             Icon(
               Icons.mic,
               size: 18,
-              color: state.isTalkActive
+              color: state.isListening
                   ? const Color(0xFFF2B33D)
                   : Colors.white24,
             ),
             const SizedBox(width: 8),
-            if (state.isTalkActive)
+            if (state.isListening)
               const MicLevelBars(
                 barCount: 5,
                 color: Color(0xFFF2B33D),

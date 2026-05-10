@@ -9,6 +9,7 @@ class ChatState extends ChangeNotifier {
   InputMode _mode = InputMode.text;
   bool _isPromptMeOn = false;
   bool _isTalkActive = false;
+  bool _isListening = false;
   String? _sessionId;
   String _currentInput = '';
   List<VoiceOption> _availableVoices = const [];
@@ -20,6 +21,7 @@ class ChatState extends ChangeNotifier {
   InputMode get mode => _mode;
   bool get isPromptMeOn => _isPromptMeOn;
   bool get isTalkActive => _isTalkActive;
+  bool get isListening => _isListening;
   String? get sessionId => _sessionId;
   String get currentInput => _currentInput;
   List<VoiceOption> get availableVoices => _availableVoices;
@@ -45,6 +47,12 @@ class ChatState extends ChangeNotifier {
     if (_isTalkActive == active) return;
     if (active && _isPromptMeOn) return;
     _isTalkActive = active;
+    notifyListeners();
+  }
+
+  void setListening(bool listening) {
+    if (_isListening == listening) return;
+    _isListening = listening;
     notifyListeners();
   }
 

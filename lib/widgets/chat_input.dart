@@ -49,9 +49,13 @@ class _ChatInputState extends State<ChatInput> {
   void _handleSend() {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
-    widget.onSend(text);
+    // Clear FIRST, then dispatch. If a second _handleSend fires in quick
+    // succession (double-tap, or Flutter Web's known onSubmitted-double-fire
+    // on Enter), the second invocation reads an empty controller and bails
+    // before duplicating the message.
     _controller.clear();
     context.read<ChatState>().clearCurrentInput();
+    widget.onSend(text);
   }
 
   @override

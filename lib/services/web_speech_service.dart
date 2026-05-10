@@ -64,13 +64,18 @@ class WebSpeechService {
     }
 
     // onresult: cumulative results since this listen() session started.
-    // Concatenate all final + interim segments into the running transcript.
+    // FINALIZED-ONLY mode: skip interim segments, only emit text when the
+    // recognizer commits a phrase. No flicker as the recognizer revises
+    // its guess mid-utterance — the user just sees text appear in chunks
+    // at natural pause points, typically right when they release PTT
+    // ("burst at the end").
     recog.onresult = ((web.SpeechRecognitionEvent ev) {
       if (controller.isClosed) return;
       final buf = StringBuffer();
       final results = ev.results;
       for (var i = 0; i < results.length; i++) {
         final result = results.item(i);
+        if (!result.isFinal) continue;
         if (result.length > 0) {
           buf.write(result.item(0).transcript);
         }
@@ -113,11 +118,49 @@ class WebSpeechService {
   }
 
   Future<void> stop() async {
+    final recog = _recog;
+    if (recog == null) {
+      await _transcripts?.close();
+      _transcripts = null;
+      return;
+    }
+
+    // Web Speech API quirk: recog.stop() signals the recognizer to flush,
+    // but trailing onresult events (carrying the last word or two) fire
+    // ASYNCHRONOUSLY after this call returns. If we close the subscription
+    // immediately we lose the end of speech.
+    //
+    // Strategy: wire a one-shot completer to the next 'end' event, call
+    // stop(), wait for onend (with a hard timeout in case it never fires).
+    // By the time onend fires, the recognizer has emitted any pending
+    // final result via onresult, which has already updated the consumer.
+    final endCompleter = Completer<void>();
+    final originalOnEnd = recog.onend;
+    recog.onend = ((web.Event ev) {
+      if (!endCompleter.isCompleted) endCompleter.complete();
+      // Forward to the listen()-installed handler so status events still flow.
+      if (originalOnEnd != null) {
+        originalOnEnd.callAsFunction(recog as JSAny?, ev as JSAny?);
+      }
+    }).toJS;
+
     try {
-      _recog?.stop();
+      recog.stop();
     } catch (e) {
       _errors.add('stop threw: $e');
     }
+
+    // Wait for the recognizer to actually finish flushing. 1.5s is generous;
+    // typical flush takes 100-400ms. The timeout guards against onend never
+    // firing on quirky browsers.
+    try {
+      await endCompleter.future.timeout(
+        const Duration(milliseconds: 1500),
+      );
+    } catch (_) {
+      // Timed out — proceed anyway; we got whatever the recognizer gave us.
+    }
+
     await _transcripts?.close();
     _transcripts = null;
   }
