@@ -41,7 +41,7 @@ class _ChatOutputState extends State<ChatOutput> {
     if (messages.isEmpty) {
       return const Center(
         child: Text(
-          'Start the conversation.',
+          'Press & hold to talk',
           style: TextStyle(color: Colors.white54),
         ),
       );

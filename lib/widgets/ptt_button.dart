@@ -6,7 +6,7 @@ class PttButton extends StatefulWidget {
     super.key,
     required this.onPressStart,
     required this.onPressEnd,
-    this.size = 120,
+    this.size = 90,
   });
 
   final VoidCallback onPressStart;
@@ -50,7 +50,7 @@ class _PttButtonState extends State<PttButton> {
         transformAlignment: Alignment.center,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: Colors.white,
+          color: const Color(0xFF2196F3),
           boxShadow: [
             if (_pressed)
               BoxShadow(

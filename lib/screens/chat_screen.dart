@@ -180,7 +180,7 @@ class _ChatScreenState extends State<ChatScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF252525),
         title: const Text(
-          'Start a new chat?',
+          'Clear conversation?',
           style: TextStyle(color: Colors.white),
         ),
         content: const Text(
@@ -201,7 +201,7 @@ class _ChatScreenState extends State<ChatScreen> {
               foregroundColor: const Color(0xFF8B1A2B),
             ),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('New chat'),
+            child: const Text('Clear'),
           ),
         ],
       ),
@@ -293,8 +293,8 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.add_comment_outlined),
-            tooltip: 'New chat',
+            icon: const Icon(Icons.clear_all),
+            tooltip: 'Clear',
             onPressed: _handleNewChat,
           ),
           IconButton(
