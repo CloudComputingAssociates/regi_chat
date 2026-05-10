@@ -45,9 +45,12 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _skipClearConfirm = false;
 
   // Prepended to EVERY user message — models drift mid-session and stop
-  // honoring a one-shot directive after a few turns. Stricter wording too.
+  // honoring a one-shot directive after a few turns. The model itself
+  // routes: terse for chitchat, complete for recipes/instructions.
   static const _conciseDirective =
-      'Reply in 1-2 sentences, max 30 words. No preamble or filler. ';
+      'For conversational questions, reply in 1-2 sentences, no preamble. '
+      'For recipes, cooking instructions, or step-by-step how-tos, '
+      'reply in full — list ingredients with amounts and complete steps. ';
 
   @override
   void initState() {
@@ -251,7 +254,8 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
               TextButton(
                 style: TextButton.styleFrom(
-                  foregroundColor: const Color(0xFF8B1A2B),
+                  foregroundColor: Colors.white,
+                  backgroundColor: const Color(0xFF8B1A2B),
                 ),
                 onPressed: () => Navigator.pop(ctx, true),
                 child: const Text('Clear'),
