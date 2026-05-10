@@ -1,11 +1,11 @@
 {
-    "name": "regi_chat",
-    "short_name": "regi_chat",
+    "name": "RegiMenu Chat",
+    "short_name": "RegiMenu",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "RegiMenu chat input/output widgets with Auth0 + voice",
+    "background_color": "#1B1B1B",
+    "theme_color": "#1B1B1B",
+    "description": "Voice + chat for RegiMenu nutrition coaching",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

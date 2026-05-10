@@ -29,14 +29,29 @@ class _ChatScreenState extends State<ChatScreen> {
   final TtsService _tts = TtsService();
   final MicLevelService _micLevel = MicLevelService();
   StreamSubscription<String>? _speechSub;
+  StreamSubscription<String>? _speechErrSub;
+  StreamSubscription<String>? _micErrSub;
 
   @override
   void initState() {
     super.initState();
     _speech.initialize();
+    // POC: surface every audio-path failure as a chat line so we can debug
+    // STT / mic-level issues from the live deploy without DevTools.
+    _speechErrSub = _speech.errors.listen((msg) => _logDebug('[stt err] $msg'));
+    _speech.statuses.listen((s) => _logDebug('[stt] $s'));
+    _micErrSub = _micLevel.errors.listen((msg) => _logDebug('[mic] $msg'));
     // Fire-and-forget voice fetch on first render. Failure is silent — the
     // picker just won't appear, and TTS falls back to the server's default.
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadVoices());
+  }
+
+  void _logDebug(String content) {
+    if (!mounted) return;
+    context.read<ChatState>().addMessage(TextMessage(
+          content: content,
+          role: MessageRole.assistant,
+        ));
   }
 
   Future<void> _loadVoices() async {
@@ -52,7 +67,10 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     _speechSub?.cancel();
+    _speechErrSub?.cancel();
+    _micErrSub?.cancel();
     _speech.stop();
+    _speech.dispose();
     _micLevel.dispose();
     _chat.dispose();
     _tts.dispose();
@@ -215,15 +233,23 @@ class _ChatScreenState extends State<ChatScreen> {
     state.setCurrentInput('');
 
     // Start the audio level sampler in parallel with STT. Fire-and-forget;
-    // if it fails the bars fall back to self-animation.
-    unawaited(_micLevel.start());
+    // if it fails the bars sit flat and the [mic] error line tells us why.
+    unawaited(_micLevel.start().then((ok) {
+      if (mounted) _logDebug('[mic] start ok=$ok');
+    }));
 
     final ok = await _speech.initialize();
+    _logDebug('[stt] initialize ok=$ok available=${_speech.isAvailable}');
     if (!ok) return;
 
     _speechSub?.cancel();
+    var firstTranscript = true;
     _speechSub = _speech.listen().listen((transcript) {
       if (!mounted) return;
+      if (firstTranscript) {
+        _logDebug('[stt] first transcript: "${transcript.length} chars"');
+        firstTranscript = false;
+      }
       context.read<ChatState>().setCurrentInput(transcript);
     });
   }

@@ -17,6 +17,8 @@ import 'package:web/web.dart' as web;
 
 class MicLevelService {
   StreamController<double>? _controller;
+  final StreamController<String> _errors =
+      StreamController<String>.broadcast();
   web.AudioContext? _ctx;
   web.MediaStream? _stream;
   Timer? _timer;
@@ -24,6 +26,9 @@ class MicLevelService {
 
   Stream<double> get levels =>
       _controller?.stream ?? const Stream<double>.empty();
+
+  /// Emits any failure during start/run as a human-readable string.
+  Stream<String> get errors => _errors.stream;
 
   Future<bool> start() async {
     if (_controller != null) return true; // already running
@@ -35,13 +40,24 @@ class MicLevelService {
         audio: true.toJS,
         video: false.toJS,
       );
-      _stream = await mediaDevices.getUserMedia(constraints).toDart;
+
+      try {
+        _stream = await mediaDevices.getUserMedia(constraints).toDart;
+      } catch (e) {
+        _errors.add('getUserMedia rejected: $e');
+        rethrow;
+      }
 
       _ctx = web.AudioContext();
       // Some browsers start the AudioContext suspended; resume explicitly
       // while the user gesture is still fresh.
       if (_ctx!.state == 'suspended') {
-        await _ctx!.resume().toDart;
+        try {
+          await _ctx!.resume().toDart;
+        } catch (e) {
+          _errors.add('AudioContext.resume failed: $e');
+          rethrow;
+        }
       }
 
       final source = _ctx!.createMediaStreamSource(_stream!);
@@ -74,7 +90,8 @@ class MicLevelService {
       });
 
       return true;
-    } catch (_) {
+    } catch (e) {
+      _errors.add('mic level start failed: $e');
       await stop();
       return false;
     }
@@ -108,5 +125,6 @@ class MicLevelService {
 
   void dispose() {
     stop();
+    _errors.close();
   }
 }
