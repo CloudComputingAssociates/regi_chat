@@ -30,5 +30,26 @@
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>
+  <script>
+    // PWA auto-update: when a new service worker version is installed,
+    // immediately reload so the user gets the latest bundle on next open
+    // without having to swipe-close the app. Without this, an installed
+    // PWA can sit on a stale cached bundle for days.
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.ready.then(function (reg) {
+        reg.addEventListener('updatefound', function () {
+          var nw = reg.installing;
+          if (!nw) return;
+          nw.addEventListener('statechange', function () {
+            // 'installed' + an existing controller means: a new SW is ready
+            // and the user already has the old one running. Reload to swap.
+            if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+              window.location.reload();
+            }
+          });
+        });
+      });
+    }
+  </script>
 </body>
 </html>
