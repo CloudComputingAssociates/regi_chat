@@ -98,30 +98,48 @@ class ChatService {
         return ChatStreamChunk(delta: payload);
       }
 
-      // Pull regi-api StreamEvent fields (models/ai.go):
-      //   type, delta, content, sessionId, sessionStatus, tokensRemaining,
-      //   contextWarning, error.
-      final delta = decoded['delta'] as String? ??
-          decoded['content'] as String? ??
-          decoded['text'] as String?;
+      // regi-api StreamEvent (models/ai.go):
+      //   { type: "content"|"done"|"error", delta, content, sessionId,
+      //     sessionStatus, tokensRemaining, contextWarning, error }
+      //
+      // Critical: on "done" events, `content` carries the FULL assembled
+      // response (for non-streaming consumers). Treating that as a delta
+      // and appending it to the message body that already has the accrued
+      // deltas results in the response rendering twice. We extract `delta`
+      // ONLY from "content" events; for "done" we ignore body-text fields
+      // entirely and use the event purely for metadata.
+      final type = decoded['type'] as String?;
 
-      // OpenAI-style nested envelope, in case some upstream uses it.
-      String? nestedDelta;
-      final choices = decoded['choices'];
-      if (choices is List && choices.isNotEmpty) {
-        final first = choices.first;
-        if (first is Map<String, dynamic>) {
-          final inner = first['delta'];
-          if (inner is Map<String, dynamic>) {
-            final c = inner['content'];
-            if (c is String) nestedDelta = c;
+      String? delta;
+      if (type == 'content') {
+        delta = decoded['delta'] as String?;
+      } else if (type == null) {
+        // Untyped event (non-conforming server). Try the historical
+        // fallbacks so a raw streamer still produces visible text.
+        delta = decoded['delta'] as String? ??
+            decoded['content'] as String? ??
+            decoded['text'] as String?;
+        // OpenAI-style nested envelope.
+        if (delta == null) {
+          final choices = decoded['choices'];
+          if (choices is List && choices.isNotEmpty) {
+            final first = choices.first;
+            if (first is Map<String, dynamic>) {
+              final inner = first['delta'];
+              if (inner is Map<String, dynamic>) {
+                final c = inner['content'];
+                if (c is String) delta = c;
+              }
+            }
           }
         }
       }
+      // type == 'done':  delta stays null — body fields are metadata only.
+      // type == 'error': delta stays null — error surfaces via .error.
 
       return ChatStreamChunk(
-        type: decoded['type'] as String?,
-        delta: delta ?? nestedDelta,
+        type: type,
+        delta: delta,
         sessionId: decoded['sessionId'] as String?,
         sessionStatus: decoded['sessionStatus'] as String?,
         tokensRemaining: decoded['tokensRemaining'] as int?,
