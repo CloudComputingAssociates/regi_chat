@@ -156,15 +156,20 @@ class _MicLevelBarsState extends State<MicLevelBars>
         // to emanate outward. Multiply t by 3 so the ripple cycles
         // ~3× per controller loop (lively but not frenetic).
         final ripplePhase = distFromCenter * 0.6;
-        final ripple = 0.5 + 0.5 * math.sin(t * 3 - ripplePhase);
+        // Ripple lifted to 0.5..1.0 (was 0..1) so the troughs no longer
+        // collapse the bars to nothing — the wave is visible as a height
+        // *modulation*, not as bars vanishing.
+        final ripple = 0.75 + 0.25 * math.sin(t * 3 - ripplePhase);
 
         // Intonation: slow per-bar drift makes adjacent bars decouple
         // slightly so the row doesn't look like a single rigid wave.
+        // Floor lifted to 0.7 so silence-equivalent moments still keep
+        // the row visually loud.
         final intonation =
-            0.55 + 0.45 * math.sin(t * 0.7 + i * 0.45);
+            0.85 + 0.15 * math.sin(t * 0.7 + i * 0.45);
 
         final bias = _biasFor(i);
-        final amp = (ripple * intonation * bias).clamp(0.05, 1.0);
+        final amp = (ripple * intonation * bias).clamp(0.0, 1.0);
         final h = widget.minHeight +
             (widget.maxHeight - widget.minHeight) * amp;
 

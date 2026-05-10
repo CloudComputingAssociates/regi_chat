@@ -28,6 +28,9 @@ class _ChatScreenState extends State<ChatScreen> {
   final ChatService _chat = ChatService();
   final WebSpeechService _speech = WebSpeechService();
   final TtsService _tts = TtsService();
+  // Constructed but currently dormant — see _handleTalkStart for why
+  // start() is not called. Kept wired (import + dispose) so re-enabling
+  // is a one-line change once the recognizer/analyser conflict is solved.
   final MicLevelService _micLevels = MicLevelService();
   StreamSubscription<String>? _speechSub;
   StreamSubscription<String>? _speechStatusSub;
@@ -239,17 +242,19 @@ class _ChatScreenState extends State<ChatScreen> {
       context.read<ChatState>().setCurrentInput(transcript);
     });
 
-    // Start the parallel mic-level analyser so the AppBar bars react to
-    // real audio. Must run inside the same user-gesture frame as the
-    // recognizer or AudioContext stays suspended on Safari/iOS.
-    unawaited(_micLevels.start());
+    // NOTE: parallel MicLevelService.start() (getUserMedia + AnalyserNode)
+    // is intentionally NOT called here. On at least one tested browser,
+    // running a second audio capture alongside webkitSpeechRecognition
+    // starves the recognizer of audio — the bars animate but STT stops
+    // producing transcripts. The service is kept for a future fix
+    // (single-capture-with-two-consumers, if/when feasible). Until then,
+    // MicLevelBars uses its ripple fallback.
   }
 
   Future<void> _handleTalkEnd() async {
     final state = context.read<ChatState>();
     if (!state.isTalkActive) return;
 
-    unawaited(_micLevels.stop());
     await _speech.stop();
     await _speechSub?.cancel();
     _speechSub = null;
@@ -290,12 +295,11 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
             const SizedBox(width: 8),
             if (state.isListening)
-              MicLevelBars(
-                levels: _micLevels.levels,
+              const MicLevelBars(
                 barCount: 11,
-                color: const Color(0xFFF2B33D),
-                minHeight: 3,
-                maxHeight: 18,
+                color: Color(0xFFF2B33D),
+                minHeight: 4,
+                maxHeight: 26,
                 barWidth: 2,
                 spacing: 2,
               ),
