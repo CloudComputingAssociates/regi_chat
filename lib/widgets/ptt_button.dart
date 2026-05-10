@@ -34,14 +34,14 @@ class _PttButtonState extends State<PttButton> {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    // Listener (raw pointer events) instead of GestureDetector so we don't
+    // get a spurious onTapCancel when a press exceeds Flutter's long-press
+    // timeout. Press = down, release = up, no gesture-arena guessing.
+    return Listener(
       behavior: HitTestBehavior.opaque,
-      onLongPressStart: (_) => _handleStart(),
-      onLongPressEnd: (_) => _handleEnd(),
-      onLongPressCancel: _handleEnd,
-      onTapDown: (_) => _handleStart(),
-      onTapUp: (_) => _handleEnd(),
-      onTapCancel: _handleEnd,
+      onPointerDown: (_) => _handleStart(),
+      onPointerUp: (_) => _handleEnd(),
+      onPointerCancel: (_) => _handleEnd(),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 80),
         width: widget.size,

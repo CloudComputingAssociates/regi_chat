@@ -17,12 +17,14 @@ class ChatInput extends StatefulWidget {
     required this.onPromptMe,
     required this.onTalkStart,
     required this.onTalkEnd,
+    this.micLevels,
   });
 
   final void Function(String text) onSend;
   final VoidCallback onPromptMe;
   final VoidCallback onTalkStart;
   final VoidCallback onTalkEnd;
+  final Stream<double>? micLevels;
 
   @override
   State<ChatInput> createState() => _ChatInputState();
@@ -82,74 +84,85 @@ class _ChatInputState extends State<ChatInput> {
       top: false,
       child: Container(
         color: _barColor,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        child: Row(
+        padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            _PromptMeButton(
-              isOn: state.isPromptMeOn,
-              onTap: () {
-                state.togglePromptMe();
-                if (state.isPromptMeOn) widget.onPromptMe();
-              },
+            // Row 1: mode + voice controls
+            Row(
+              children: [
+                _PromptMeButton(
+                  isOn: state.isPromptMeOn,
+                  onTap: () {
+                    state.togglePromptMe();
+                    if (state.isPromptMeOn) widget.onPromptMe();
+                  },
+                ),
+                const Spacer(),
+                ModeSlider(
+                  mode: state.mode,
+                  onChanged: state.setMode,
+                ),
+                const SizedBox(width: 8),
+                _TalkButton(
+                  enabled: isVoice,
+                  active: state.isTalkActive,
+                  onPressStart: widget.onTalkStart,
+                  onPressEnd: widget.onTalkEnd,
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: TextField(
-                controller: _controller,
-                focusNode: _focusNode,
-                readOnly: isVoice,
-                minLines: 1,
-                maxLines: 4,
-                textInputAction: TextInputAction.send,
-                onSubmitted: (_) => _handleSend(),
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  filled: true,
-                  fillColor: isVoice
-                      ? const Color(0xFF2A2A2A)
-                      : const Color(0xFF555555),
-                  hintText: isVoice
-                      ? 'Hold the button and speak...'
-                      : 'Type a message...',
-                  hintStyle: const TextStyle(color: Colors.white54),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(20),
-                    borderSide: BorderSide.none,
-                  ),
-                  suffixIcon: state.isTalkActive
-                      ? const Padding(
-                          padding: EdgeInsets.only(right: 12),
-                          child: MicLevelBars(),
-                        )
-                      : null,
-                  suffixIconConstraints: const BoxConstraints(
-                    minWidth: 0,
-                    minHeight: 0,
+            const SizedBox(height: 6),
+            // Row 2: text input + send
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _controller,
+                    focusNode: _focusNode,
+                    readOnly: isVoice,
+                    minLines: 1,
+                    maxLines: 4,
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: (_) => _handleSend(),
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      filled: true,
+                      fillColor: isVoice
+                          ? const Color(0xFF2A2A2A)
+                          : const Color(0xFF555555),
+                      hintText: isVoice
+                          ? 'Hold the button and speak...'
+                          : 'Type a message...',
+                      hintStyle: const TextStyle(color: Colors.white54),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(20),
+                        borderSide: BorderSide.none,
+                      ),
+                      suffixIcon: state.isTalkActive
+                          ? Padding(
+                              padding: const EdgeInsets.only(right: 12),
+                              child: MicLevelBars(levels: widget.micLevels),
+                            )
+                          : null,
+                      suffixIconConstraints: const BoxConstraints(
+                        minWidth: 0,
+                        minHeight: 0,
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            _SquareButton(
-              icon: Icons.send,
-              tooltip: 'Send',
-              onTap: _handleSend,
-            ),
-            const SizedBox(width: 8),
-            ModeSlider(
-              mode: state.mode,
-              onChanged: state.setMode,
-            ),
-            const SizedBox(width: 8),
-            _TalkButton(
-              enabled: isVoice,
-              active: state.isTalkActive,
-              onPressStart: widget.onTalkStart,
-              onPressEnd: widget.onTalkEnd,
+                const SizedBox(width: 8),
+                _SquareButton(
+                  icon: Icons.send,
+                  tooltip: 'Send',
+                  onTap: _handleSend,
+                ),
+              ],
             ),
           ],
         ),
@@ -249,13 +262,11 @@ class _TalkButton extends StatelessWidget {
         : active
             ? _talkActiveColor
             : const Color(0xFF555555);
-    return GestureDetector(
-      onLongPressStart: enabled ? (_) => onPressStart() : null,
-      onLongPressEnd: enabled ? (_) => onPressEnd() : null,
-      onLongPressCancel: enabled ? onPressEnd : null,
-      onTapDown: enabled ? (_) => onPressStart() : null,
-      onTapUp: enabled ? (_) => onPressEnd() : null,
-      onTapCancel: enabled ? onPressEnd : null,
+    return Listener(
+      behavior: HitTestBehavior.opaque,
+      onPointerDown: enabled ? (_) => onPressStart() : null,
+      onPointerUp: enabled ? (_) => onPressEnd() : null,
+      onPointerCancel: enabled ? (_) => onPressEnd() : null,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 100),
         width: 44,

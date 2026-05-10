@@ -7,6 +7,7 @@ import '../models/chat_message.dart';
 import '../models/input_mode.dart';
 import '../services/auth_service.dart';
 import '../services/chat_service.dart';
+import '../services/mic_level_service.dart';
 import '../services/speech_service.dart';
 import '../services/tts_service.dart' show TtsService, TtsException;
 import '../state/chat_state.dart';
@@ -26,6 +27,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final ChatService _chat = ChatService();
   final SpeechService _speech = SpeechService();
   final TtsService _tts = TtsService();
+  final MicLevelService _micLevel = MicLevelService();
   StreamSubscription<String>? _speechSub;
 
   @override
@@ -51,6 +53,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void dispose() {
     _speechSub?.cancel();
     _speech.stop();
+    _micLevel.dispose();
     _chat.dispose();
     _tts.dispose();
     super.dispose();
@@ -211,6 +214,10 @@ class _ChatScreenState extends State<ChatScreen> {
     state.setTalkActive(true);
     state.setCurrentInput('');
 
+    // Start the audio level sampler in parallel with STT. Fire-and-forget;
+    // if it fails the bars fall back to self-animation.
+    unawaited(_micLevel.start());
+
     final ok = await _speech.initialize();
     if (!ok) return;
 
@@ -228,6 +235,7 @@ class _ChatScreenState extends State<ChatScreen> {
     await _speech.stop();
     await _speechSub?.cancel();
     _speechSub = null;
+    unawaited(_micLevel.stop());
 
     final transcript = state.currentInput.trim();
     state.setTalkActive(false);
@@ -274,6 +282,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 onPromptMe: _handlePromptMe,
                 onTalkStart: _handleTalkStart,
                 onTalkEnd: _handleTalkEnd,
+                micLevels: _micLevel.levels,
               ),
             ],
           ),
@@ -281,7 +290,9 @@ class _ChatScreenState extends State<ChatScreen> {
             Positioned(
               left: 0,
               right: 0,
-              bottom: 140, // ~64dp bar + ~24dp safe area + ~52dp gap = ~3/4"
+              // Bar is now two rows: ~56dp controls + 6dp gap + ~56dp input
+              // = ~118dp + ~24dp safe-area + ~52dp gap above = ~210dp.
+              bottom: 210,
               child: Center(
                 child: PttButton(
                   onPressStart: _handleTalkStart,
