@@ -3,9 +3,9 @@ import 'package:provider/provider.dart';
 
 import '../state/chat_state.dart';
 
-/// Horizontal chip row showing the voices fetched from `/api/tts/voices`.
-/// Selected chip is amber; unselected are dark gray. The chosen voice's ID
-/// is sent in the body of `POST /api/tts` for assistant replies.
+/// Voice catalog row — fetched from `GET /api/tts/voices`. The selected
+/// voice ID is sent in the body of `POST /api/tts` for assistant replies.
+/// Speed and mute live in the chat input bar; this row is just selection.
 class VoicePicker extends StatelessWidget {
   const VoicePicker({super.key});
 

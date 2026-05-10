@@ -13,6 +13,8 @@ class ChatState extends ChangeNotifier {
   String _currentInput = '';
   List<VoiceOption> _availableVoices = const [];
   VoiceOption? _selectedVoice;
+  bool _ttsEnabled = true;
+  double _ttsRate = 1.25;
 
   List<ChatMessage> get messages => List.unmodifiable(_messages);
   InputMode get mode => _mode;
@@ -22,6 +24,8 @@ class ChatState extends ChangeNotifier {
   String get currentInput => _currentInput;
   List<VoiceOption> get availableVoices => _availableVoices;
   VoiceOption? get selectedVoice => _selectedVoice;
+  bool get ttsEnabled => _ttsEnabled;
+  double get ttsRate => _ttsRate;
 
   void setMode(InputMode mode) {
     if (_mode == mode) return;
@@ -99,6 +103,20 @@ class ChatState extends ChangeNotifier {
   void setSelectedVoice(VoiceOption voice) {
     if (_selectedVoice?.id == voice.id) return;
     _selectedVoice = voice;
+    notifyListeners();
+  }
+
+  void toggleTts() {
+    _ttsEnabled = !_ttsEnabled;
+    notifyListeners();
+  }
+
+  /// Clamps to GCP TTS's accepted range (0.25..4.0). Practical UI range
+  /// is narrower (e.g. 0.75..2.0) — clamping defends against bad input.
+  void setTtsRate(double rate) {
+    final clamped = rate.clamp(0.25, 4.0);
+    if ((clamped - _ttsRate).abs() < 0.001) return;
+    _ttsRate = clamped;
     notifyListeners();
   }
 

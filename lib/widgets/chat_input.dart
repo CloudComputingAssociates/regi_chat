@@ -3,10 +3,8 @@ import 'package:provider/provider.dart';
 
 import '../models/input_mode.dart';
 import '../state/chat_state.dart';
-import 'mic_level_bars.dart';
 import 'mode_slider.dart';
 
-const _promptMeColor = Color(0xFF8B1A2B);
 const _talkActiveColor = Color(0xFFF2B33D);
 const _barColor = Color(0xFF3A3A3A);
 
@@ -14,17 +12,13 @@ class ChatInput extends StatefulWidget {
   const ChatInput({
     super.key,
     required this.onSend,
-    required this.onPromptMe,
     required this.onTalkStart,
     required this.onTalkEnd,
-    this.micLevels,
   });
 
   final void Function(String text) onSend;
-  final VoidCallback onPromptMe;
   final VoidCallback onTalkStart;
   final VoidCallback onTalkEnd;
-  final Stream<double>? micLevels;
 
   @override
   State<ChatInput> createState() => _ChatInputState();
@@ -65,9 +59,9 @@ class _ChatInputState extends State<ChatInput> {
     final state = context.watch<ChatState>();
     final isVoice = state.mode == InputMode.voice;
 
-    // Sync external transcript updates (from STT) into the controller
-    // when in voice mode. Defer to post-frame so we don't mutate the
-    // controller during build.
+    // Voice mode: STT writes the live transcript into state.currentInput.
+    // Sync into the read-only TextField via post-frame so we don't mutate
+    // the controller during build.
     if (isVoice && _controller.text != state.currentInput) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -88,15 +82,17 @@ class _ChatInputState extends State<ChatInput> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Row 1: mode + voice controls
+            // Row 1: TTS controls (left) + input mode + Talk (right)
             Row(
               children: [
-                _PromptMeButton(
-                  isOn: state.isPromptMeOn,
-                  onTap: () {
-                    state.togglePromptMe();
-                    if (state.isPromptMeOn) widget.onPromptMe();
-                  },
+                _SpeedButton(
+                  rate: state.ttsRate,
+                  onChanged: state.setTtsRate,
+                ),
+                const SizedBox(width: 6),
+                _MuteButton(
+                  enabled: state.ttsEnabled,
+                  onTap: state.toggleTts,
                 ),
                 const Spacer(),
                 ModeSlider(
@@ -143,16 +139,6 @@ class _ChatInputState extends State<ChatInput> {
                         borderRadius: BorderRadius.circular(20),
                         borderSide: BorderSide.none,
                       ),
-                      suffixIcon: state.isTalkActive
-                          ? Padding(
-                              padding: const EdgeInsets.only(right: 12),
-                              child: MicLevelBars(levels: widget.micLevels),
-                            )
-                          : null,
-                      suffixIconConstraints: const BoxConstraints(
-                        minWidth: 0,
-                        minHeight: 0,
-                      ),
                     ),
                   ),
                 ),
@@ -171,38 +157,97 @@ class _ChatInputState extends State<ChatInput> {
   }
 }
 
-class _PromptMeButton extends StatelessWidget {
-  const _PromptMeButton({required this.isOn, required this.onTap});
+class _SpeedButton extends StatelessWidget {
+  const _SpeedButton({required this.rate, required this.onChanged});
 
-  final bool isOn;
+  final double rate;
+  final ValueChanged<double> onChanged;
+
+  static const _presets = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<double>(
+      tooltip: 'Playback speed',
+      onSelected: onChanged,
+      color: const Color(0xFF252525),
+      itemBuilder: (_) => [
+        for (final p in _presets)
+          PopupMenuItem<double>(
+            value: p,
+            child: Row(
+              children: [
+                if ((p - rate).abs() < 0.001)
+                  const Icon(Icons.check,
+                      size: 14, color: Color(0xFFF2B33D))
+                else
+                  const SizedBox(width: 14),
+                const SizedBox(width: 6),
+                Text(
+                  '${p.toStringAsFixed(2)}×',
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+      ],
+      child: Container(
+        height: 36,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFF555555),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        alignment: Alignment.center,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.speed, size: 14, color: Colors.white70),
+            const SizedBox(width: 4),
+            Text(
+              '${rate.toStringAsFixed(2)}×',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MuteButton extends StatelessWidget {
+  const _MuteButton({required this.enabled, required this.onTap});
+
+  final bool enabled;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 120),
-        width: 44,
-        height: 44,
-        decoration: BoxDecoration(
-          color: isOn ? _promptMeColor : const Color(0xFF555555),
-          shape: BoxShape.circle,
-          boxShadow: isOn
-              ? [
-                  const BoxShadow(
-                    color: Colors.black54,
-                    blurRadius: 4,
-                    offset: Offset(0, 2),
-                  ),
-                ]
-              : null,
-        ),
-        alignment: Alignment.center,
-        child: Icon(
-          Icons.auto_awesome,
-          color: isOn ? Colors.white : Colors.white70,
-          size: 20,
+    return Tooltip(
+      message: enabled ? 'Mute spoken replies' : 'Unmute spoken replies',
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: enabled
+                ? const Color(0xFF555555)
+                : const Color(0xFF8B1A2B),
+            shape: BoxShape.circle,
+          ),
+          alignment: Alignment.center,
+          child: Icon(
+            enabled ? Icons.record_voice_over : Icons.voice_over_off,
+            size: 18,
+            color: Colors.white,
+          ),
         ),
       ),
     );
