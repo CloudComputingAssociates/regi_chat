@@ -226,6 +226,8 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  StreamSubscription<double>? _micLevelDebugSub;
+
   Future<void> _handleTalkStart() async {
     final state = context.read<ChatState>();
     if (state.isPromptMeOn) return;
@@ -235,7 +237,31 @@ class _ChatScreenState extends State<ChatScreen> {
     // Start the audio level sampler in parallel with STT. Fire-and-forget;
     // if it fails the bars sit flat and the [mic] error line tells us why.
     unawaited(_micLevel.start().then((ok) {
-      if (mounted) _logDebug('[mic] start ok=$ok');
+      if (!mounted) return;
+      _logDebug('[mic] start ok=$ok');
+      if (ok) {
+        // Sample peak level every ~500ms so we can see if audio is actually
+        // flowing. If peaks stay at 0 across the hold, mic is silent.
+        _micLevelDebugSub?.cancel();
+        var peak = 0.0;
+        var samples = 0;
+        Timer? heartbeat;
+        _micLevelDebugSub = _micLevel.levels.listen((v) {
+          if (v > peak) peak = v;
+          samples++;
+        });
+        heartbeat = Timer.periodic(const Duration(milliseconds: 500), (t) {
+          if (!mounted || _micLevelDebugSub == null) {
+            t.cancel();
+            return;
+          }
+          _logDebug('[mic] peak=${peak.toStringAsFixed(3)} samples=$samples');
+          peak = 0.0;
+          samples = 0;
+        });
+        // Stash the heartbeat so dispose can cancel it.
+        _micLevelHeartbeat = heartbeat;
+      }
     }));
 
     final ok = await _speech.initialize();
@@ -243,16 +269,23 @@ class _ChatScreenState extends State<ChatScreen> {
     if (!ok) return;
 
     _speechSub?.cancel();
-    var firstTranscript = true;
+    var transcriptCount = 0;
     _speechSub = _speech.listen().listen((transcript) {
       if (!mounted) return;
-      if (firstTranscript) {
-        _logDebug('[stt] first transcript: "${transcript.length} chars"');
-        firstTranscript = false;
+      transcriptCount++;
+      // Log first event and every 5th after, with a short snippet.
+      if (transcriptCount == 1 || transcriptCount % 5 == 0) {
+        final snippet = transcript.length > 40
+            ? '${transcript.substring(0, 40)}…'
+            : transcript;
+        _logDebug('[stt] event #$transcriptCount: "$snippet" '
+            '(len=${transcript.length})');
       }
       context.read<ChatState>().setCurrentInput(transcript);
     });
   }
+
+  Timer? _micLevelHeartbeat;
 
   Future<void> _handleTalkEnd() async {
     final state = context.read<ChatState>();
@@ -261,9 +294,15 @@ class _ChatScreenState extends State<ChatScreen> {
     await _speech.stop();
     await _speechSub?.cancel();
     _speechSub = null;
+    _micLevelHeartbeat?.cancel();
+    _micLevelHeartbeat = null;
+    await _micLevelDebugSub?.cancel();
+    _micLevelDebugSub = null;
     unawaited(_micLevel.stop());
 
     final transcript = state.currentInput.trim();
+    _logDebug('[stt] release: transcript="${transcript.length} chars" '
+        'sending=${transcript.isNotEmpty}');
     state.setTalkActive(false);
     state.clearCurrentInput();
 
