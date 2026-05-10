@@ -64,23 +64,25 @@ class WebSpeechService {
     }
 
     // onresult: cumulative results since this listen() session started.
-    // FINALIZED-ONLY mode: skip interim segments, only emit text when the
-    // recognizer commits a phrase. No flicker as the recognizer revises
-    // its guess mid-utterance — the user just sees text appear in chunks
-    // at natural pause points, typically right when they release PTT
-    // ("burst at the end").
+    // LATEST-FINAL mode: in continuous mode on Chrome (especially Android),
+    // a single spoken phrase can produce multiple final results as the
+    // recognizer over-segments and revises. Concatenating them gives
+    // "whowho holds the who holds the title" gibberish. The latest final
+    // result is the recognizer's most complete take and is what the user
+    // actually wants for one PTT press = one phrase semantics.
     recog.onresult = ((web.SpeechRecognitionEvent ev) {
       if (controller.isClosed) return;
-      final buf = StringBuffer();
       final results = ev.results;
-      for (var i = 0; i < results.length; i++) {
+      String? latest;
+      for (var i = results.length - 1; i >= 0; i--) {
         final result = results.item(i);
         if (!result.isFinal) continue;
         if (result.length > 0) {
-          buf.write(result.item(0).transcript);
+          latest = result.item(0).transcript;
+          break;
         }
       }
-      controller.add(buf.toString());
+      if (latest != null) controller.add(latest);
     }).toJS;
 
     recog.onerror = ((web.SpeechRecognitionErrorEvent ev) {
