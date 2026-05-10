@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/chat_message.dart';
 import '../models/input_mode.dart';
@@ -38,6 +39,11 @@ class _ChatScreenState extends State<ChatScreen> {
   // _sendMessage (rapid double-tap, Flutter Web onSubmitted bugs, etc.).
   bool _sending = false;
 
+  // Persisted: once the user ticks "Don't ask again" in the Clear dialog,
+  // future Clear taps skip the dialog. Reset by clearing site data.
+  static const _skipClearPrefKey = 'clear_confirm_skip';
+  bool _skipClearConfirm = false;
+
   // Prepended to EVERY user message — models drift mid-session and stop
   // honoring a one-shot directive after a few turns. Stricter wording too.
   static const _conciseDirective =
@@ -64,6 +70,15 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     });
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadVoices());
+    _loadSkipClearPref();
+  }
+
+  Future<void> _loadSkipClearPref() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _skipClearConfirm = prefs.getBool(_skipClearPrefKey) ?? false;
+    });
   }
 
   Future<void> _loadVoices() async {
@@ -181,38 +196,79 @@ class _ChatScreenState extends State<ChatScreen> {
     final state = context.read<ChatState>();
     if (state.messages.isEmpty && state.sessionId == null) return;
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF252525),
-        title: const Text(
-          'Clear conversation?',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: const Text(
-          'The current conversation will clear from this view. '
-          'Server-side history is preserved.',
-          style: TextStyle(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(color: Colors.white70),
+    bool confirmed;
+    if (_skipClearConfirm) {
+      confirmed = true;
+    } else {
+      bool dontAskAgain = false;
+      final result = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setSt) => AlertDialog(
+            backgroundColor: const Color(0xFF252525),
+            title: const Text(
+              'Clear conversation?',
+              style: TextStyle(color: Colors.white),
             ),
-          ),
-          TextButton(
-            style: TextButton.styleFrom(
-              foregroundColor: const Color(0xFF8B1A2B),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'The current conversation will clear from this view. '
+                  'Server-side history is preserved.',
+                  style: TextStyle(color: Colors.white70),
+                ),
+                const SizedBox(height: 12),
+                InkWell(
+                  onTap: () => setSt(() => dontAskAgain = !dontAskAgain),
+                  child: Row(
+                    children: [
+                      Checkbox(
+                        value: dontAskAgain,
+                        onChanged: (v) =>
+                            setSt(() => dontAskAgain = v ?? false),
+                        activeColor: const Color(0xFF2196F3),
+                        checkColor: Colors.white,
+                        side: const BorderSide(color: Colors.white54),
+                      ),
+                      const Text(
+                        "Don't ask again",
+                        style: TextStyle(color: Colors.white70),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Clear'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text(
+                  'Cancel',
+                  style: TextStyle(color: Colors.white70),
+                ),
+              ),
+              TextButton(
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFF8B1A2B),
+                ),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Clear'),
+              ),
+            ],
           ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
+        ),
+      );
+      confirmed = result == true;
+      if (confirmed && dontAskAgain) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool(_skipClearPrefKey, true);
+        if (mounted) setState(() => _skipClearConfirm = true);
+      }
+    }
+
+    if (!confirmed || !mounted) return;
 
     final priorSessionId = state.sessionId;
     final auth = context.read<AuthService>();
