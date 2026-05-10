@@ -5,7 +5,7 @@
   # config is injected via --dart-define and read by lib/config.dart.
   command = """
     touch .env && \
-    git clone https://github.com/flutter/flutter.git --depth 1 -b stable _flutter && \
+    ([ -d _flutter ] || git clone https://github.com/flutter/flutter.git --depth 1 -b stable _flutter) && \
     export PATH="$PATH:$(pwd)/_flutter/bin" && \
     flutter pub get && \
     flutter build web --release \
