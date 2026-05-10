@@ -7,6 +7,7 @@ import '../models/chat_message.dart';
 import '../models/input_mode.dart';
 import '../services/auth_service.dart';
 import '../services/chat_service.dart';
+import '../services/mic_level_service.dart';
 import '../services/tts_service.dart' show TtsService, TtsException;
 import '../services/web_speech_service.dart';
 import '../state/chat_state.dart';
@@ -27,6 +28,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final ChatService _chat = ChatService();
   final WebSpeechService _speech = WebSpeechService();
   final TtsService _tts = TtsService();
+  final MicLevelService _micLevels = MicLevelService();
   StreamSubscription<String>? _speechSub;
   StreamSubscription<String>? _speechStatusSub;
   // In-flight guard. Defends against any path that double-invokes
@@ -79,6 +81,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _speech.dispose();
     _chat.dispose();
     _tts.dispose();
+    _micLevels.dispose();
     super.dispose();
   }
 
@@ -235,12 +238,18 @@ class _ChatScreenState extends State<ChatScreen> {
       if (!mounted) return;
       context.read<ChatState>().setCurrentInput(transcript);
     });
+
+    // Start the parallel mic-level analyser so the AppBar bars react to
+    // real audio. Must run inside the same user-gesture frame as the
+    // recognizer or AudioContext stays suspended on Safari/iOS.
+    unawaited(_micLevels.start());
   }
 
   Future<void> _handleTalkEnd() async {
     final state = context.read<ChatState>();
     if (!state.isTalkActive) return;
 
+    unawaited(_micLevels.stop());
     await _speech.stop();
     await _speechSub?.cancel();
     _speechSub = null;
@@ -281,11 +290,12 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
             const SizedBox(width: 8),
             if (state.isListening)
-              const MicLevelBars(
-                barCount: 5,
-                color: Color(0xFFF2B33D),
-                minHeight: 4,
-                maxHeight: 16,
+              MicLevelBars(
+                levels: _micLevels.levels,
+                barCount: 11,
+                color: const Color(0xFFF2B33D),
+                minHeight: 3,
+                maxHeight: 18,
                 barWidth: 2,
                 spacing: 2,
               ),

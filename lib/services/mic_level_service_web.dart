@@ -16,22 +16,28 @@ import 'dart:typed_data';
 import 'package:web/web.dart' as web;
 
 class MicLevelService {
-  StreamController<double>? _controller;
+  // Permanent broadcast controller — created once at construction and kept
+  // open until dispose(). Consumers (e.g., MicLevelBars) capture this
+  // stream reference at subscribe time, so it must survive start/stop
+  // cycles. Recreating it per start() leaves any pre-subscribed widget
+  // listening to a closed/empty stream and the bars sit dead.
+  final StreamController<double> _levels =
+      StreamController<double>.broadcast();
   final StreamController<String> _errors =
       StreamController<String>.broadcast();
   web.AudioContext? _ctx;
   web.MediaStream? _stream;
   Timer? _timer;
   JSUint8Array? _buffer;
+  bool _running = false;
 
-  Stream<double> get levels =>
-      _controller?.stream ?? const Stream<double>.empty();
+  Stream<double> get levels => _levels.stream;
 
   /// Emits any failure during start/run as a human-readable string.
   Stream<String> get errors => _errors.stream;
 
   Future<bool> start() async {
-    if (_controller != null) return true; // already running
+    if (_running) return true;
 
     try {
       final mediaDevices = web.window.navigator.mediaDevices;
@@ -70,11 +76,10 @@ class MicLevelService {
       // Pre-allocate the JS-side typed array so each frame doesn't allocate.
       _buffer = Uint8List(bufferLength).toJS;
 
-      final controller = StreamController<double>.broadcast();
-      _controller = controller;
+      _running = true;
 
       _timer = Timer.periodic(const Duration(milliseconds: 50), (_) {
-        if (controller.isClosed) return;
+        if (_levels.isClosed || !_running) return;
         final buf = _buffer;
         if (buf == null) return;
         analyser.getByteFrequencyData(buf);
@@ -86,7 +91,7 @@ class MicLevelService {
         final avg = (sum / bytes.length) / 255.0;
         // Noise gate: silence reads as zero so bars rest, not jitter.
         final gated = avg < 0.04 ? 0.0 : avg;
-        controller.add(gated);
+        _levels.add(gated);
       });
 
       return true;
@@ -98,8 +103,13 @@ class MicLevelService {
   }
 
   Future<void> stop() async {
+    _running = false;
     _timer?.cancel();
     _timer = null;
+
+    // Emit one zero so any subscribed visualizer drops to rest immediately
+    // instead of holding the last live sample as its frozen height.
+    if (!_levels.isClosed) _levels.add(0);
 
     final tracks = _stream?.getTracks().toDart;
     if (tracks != null) {
@@ -117,14 +127,11 @@ class MicLevelService {
     }
 
     _buffer = null;
-
-    final c = _controller;
-    _controller = null;
-    await c?.close();
   }
 
   void dispose() {
     stop();
+    _levels.close();
     _errors.close();
   }
 }

@@ -310,7 +310,7 @@ class _TalkButton extends StatelessWidget {
         ? const Color(0xFF333333)
         : active
             ? _talkActiveColor
-            : const Color(0xFF555555);
+            : const Color(0xFF2196F3);
     return Listener(
       behavior: HitTestBehavior.opaque,
       onPointerDown: enabled ? (_) => onPressStart() : null,
